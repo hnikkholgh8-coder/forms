@@ -1,0 +1,146 @@
+#!/usr/bin/env yaml
+# Docker Compose Configuration for Exir Pooyan Local Development
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: exir_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password_dev
+      POSTGRES_DB: exir_pooyan
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql_schemas.txt:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - exir_network
+
+  # Directus Headless CMS
+  directus:
+    image: directus/directus:latest
+    container_name: exir_directus
+    environment:
+      KEY: ${DIRECTUS_KEY:-d6c76ef5-0b90-45c6-9ea8-50d627f3a84d}
+      SECRET: ${DIRECTUS_SECRET:-6116487b142c42f7ae1c3ca6d588454e}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@exirpooyan.com}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-ChangeMe}
+      DB_CLIENT: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: exir_pooyan
+      DB_USER: postgres
+      DB_PASSWORD: postgres_password_dev
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "*"
+      PUBLIC_URL: http://localhost:8055
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8055:8055"
+    volumes:
+      - directus_data:/directus/uploads
+    networks:
+      - exir_network
+
+  # Keycloak Authentication Server
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0.0
+    container_name: exir_keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-ChangeMe}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/exir_pooyan
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres_password_dev
+      KC_PROXY: edge
+      KC_HOSTNAME_STRICT: "false"
+    command:
+      - start-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks:
+      - exir_network
+
+  # Redis Cache (Optional)
+  redis:
+    image: redis:7-alpine
+    container_name: exir_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - exir_network
+
+  # pgAdmin for PostgreSQL Management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: exir_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@exirpooyan.com
+      PGADMIN_DEFAULT_PASSWORD: pgadmin_password
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - exir_network
+
+  # FastAPI Backend (Development Mode)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: exir_backend
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: postgres
+      PG_PASSWORD: postgres_password_dev
+      PG_DATABASE: exir_pooyan
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@exirpooyan.com}
+      DIRECTUS_ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-ChangeMe}
+      KEYCLOAK_URL: http://keycloak:8080/realms/exir
+      REDIS_URL: redis://redis:6379/0
+      APP_DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    depends_on:
+      - postgres
+      - directus
+      - keycloak
+      - redis
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - exir_network
+
+networks:
+  exir_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  directus_data:
+    driver: local
+  redis_data:
+    driver: local
