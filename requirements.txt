@@ -21,7 +21,7 @@ bcrypt==4.1.1
 cryptography==41.0.7
 
 # Date/Time Processing
-jdatetime==4.7.0
+jdatetime>=5.0.0
 
 # Data Processing
 pandas==2.1.3
